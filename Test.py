@@ -4,11 +4,20 @@ import operator
 import numpy as np
 
 from difflib import SequenceMatcher
+from shutil import copy2
 
-img_path = "/media/BunNet/pictures/"
+##############################################
+root_path = "/media/BunNet/"
+img_folder = "pictures"
+data_folder = "data"
 verbose=False
+##############################################
 
-img_names = sorted(os.listdir(img_path))
+#create data folder if it doesn't exist yet
+if data_folder not in os.listdir(root_path):
+    os.mkdir(root_path + data_folder)
+
+img_names = sorted(os.listdir(root_path + img_folder))
 
 #Replace digits with 'X' becasue gitis are part of the pattern but their values are irrelevent.
 #Also remove file extensions
@@ -53,6 +62,23 @@ for idImg, img in enumerate(img_names_filt):
 keySize = [len(di_class[key]) for key in di_class]
 print('Total number of key: {}, with average size:{} std:{}, min:{}, max:{}'\
       .format(len(di_class), np.mean(keySize), np.std(keySize), min(keySize), max(keySize)))
+
+
+#Copy into data and preserve the class ordering.
+for idKey, key in enumerate(di_class):
+    print('Copying key #{} out of {} ({:.2f}%)'.format(idKey, len(di_class), 100*(idKey/len(di_class))))
+    #Create folder if it doesn't exists
+    if key not in os.listdir(root_path + data_folder):
+        os.mkdir(root_path+data_folder+"/"+key)
+    #copy image into the right folder
+    for (img, imgID) in di_class[key]:
+        src = root_path+img_folder+"/"+img_names[imgID]
+        dst = root_path+data_folder+"/"+key+"/"
+        copy2(src, dst)
+
+
+
+
 
 
 
