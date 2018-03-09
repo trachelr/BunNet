@@ -5,6 +5,7 @@ import cv2
 import datetime
 
 import numpy as np
+import pylab as plt
 
 from PIL import Image
 
@@ -25,16 +26,42 @@ e_tag_model = 272
 print('root_path is: {}'.format(root_path))
 print('log file is: {}'.format(log_path))
 all_files = []
+classSize = []
 all_folders = sorted(os.listdir(root_path))
 for fold in all_folders:
     for file in sorted(os.listdir(root_path+fold)):
         all_files.append(root_path+fold+'/'+file)
+        
+    classSize.append(len(os.listdir(root_path+fold)))
 all_files = sorted(all_files)
 
 if fastMode:
-    all_files = all_files[0:100]
+    all_files = all_files[0:25]
 
 print('found {} folder and {} files'.format(len(all_folders), len(all_files)))
+
+#Stats
+classSize = np.array(classSize)
+classSize.sort()
+
+meanSize = classSize.mean()
+stdSize = classSize.std()
+minSize = classSize.min()
+maxSize = classSize.max()
+print('Class size report -- mean: {}, std: {}, min:{}, max:{}'.format(meanSize, stdSize, minSize, maxSize))
+
+ratioClass = np.array([(classSize>i).sum() for i in np.arange(minSize, maxSize, 1)])
+
+plt.ion()
+plt.figure()
+plt.bar(np.arange(classSize.shape[0]), classSize)
+plt.xlabel('classes')
+plt.ylabel('# of elements')
+         
+plt.figure()
+plt.bar(np.arange(minSize, maxSize, 1), ratioClass)
+plt.xlabel('Smallest class size')
+plt.ylabel('Number of class')
 
 #Check for Similarities.
 #This is done by maintaining a imageXimage similarity matrix
@@ -196,46 +223,46 @@ print('{} weak anomalies detected'.format(len(anomaly_weak)))
 
 
 ##Logging
-log_file.writelines('{} duplicate entries'.format(len(duplicate)))
-log_file.writelines('{} strong match entries'.format(len(duplicate)))
-log_file.writelines('{} medium match entries'.format(len(duplicate)))
-log_file.writelines('{} weak match entries'.format(len(duplicate)))
-log_file.writelines('{} medium anomalies entries'.format(len(duplicate)))
-log_file.writelines('{} weak anomalies entries'.format(len(duplicate)))
-log_file.writelines('')
-log_file.writelines('======== DUPLICATE ========')
-log_file.writelines('(exactly the same file)')
+log_file.writelines('{} duplicate entries\n'.format(len(duplicate)))
+log_file.writelines('{} strong match entries\n'.format(len(match_strong)))
+log_file.writelines('{} medium match entries\n'.format(len(match_medium)))
+log_file.writelines('{} weak match entries\n'.format(len(match_weak)))
+log_file.writelines('{} medium anomalies entries\n'.format(len(anomaly_medium)))
+log_file.writelines('{} weak anomalies entries\n'.format(len(anomaly_weak)))
+log_file.writelines('\n')
+log_file.writelines('======== DUPLICATE ========\n')
+log_file.writelines('(exactly the same file)\n')
 for e in duplicate:
-    log_file.writelines('{} and {}'.format(e[0], e[1]))
-log_file.writelines('')
-log_file.writelines('')
-log_file.writelines('======== STRONG MATCH ========')
-log_file.writelines('(Duplicate file in different folder. Folders should likely be merged)')
+    log_file.writelines('{} and {}\n'.format(e[0], e[1]))
+log_file.writelines('\n')
+log_file.writelines('\n')
+log_file.writelines('======== STRONG MATCH ========\n')
+log_file.writelines('(Duplicate file in different folder. Folders should likely be merged)\n')
 for e in match_strong:
-    log_file.writelines('{} and {}'.format(e[0], e[1]))
-log_file.writelines('')
-log_file.writelines('')
-log_file.writelines('======== MEDIUM MATCH ========')
-log_file.writelines('(Same camera, different folder. Might be different bunnies but the same photographer)')
+    log_file.writelines('{} and {}\n'.format(e[0], e[1]))
+log_file.writelines('\n')
+log_file.writelines('\n')
+log_file.writelines('======== MEDIUM MATCH ========\n')
+log_file.writelines('(Same camera, different folder. Might be different bunnies but the same photographer)\n')
 for e in match_medium:
-    log_file.writelines('{} and {}'.format(e[0], e[1]))
-log_file.writelines('')
-log_file.writelines('')
-log_file.writelines('======== WEAK MATCH ========')
-log_file.writelines('(Pictures taken within a short time frame across different folders. Might be just luck)')
+    log_file.writelines('{} and {}\n'.format(e[0], e[1]))
+log_file.writelines('\n')
+log_file.writelines('\n')
+log_file.writelines('======== WEAK MATCH ========\n')
+log_file.writelines('(Pictures taken within a short time frame across different folders. Might be just luck)\n')
 for e in match_weak:
-    log_file.writelines('{} and {}'.format(e[0], e[1]))
-log_file.writelines('')
-log_file.writelines('')
-log_file.writelines('======== MEDIUM ANOMALY ========')
-log_file.writelines('(Different camera, same folder. Owner might have changed camera. If shots are close in time it is probably a true error)')
+    log_file.writelines('{} and {}\n'.format(e[0], e[1]))
+log_file.writelines('\n')
+log_file.writelines('\n')
+log_file.writelines('======== MEDIUM ANOMALY ========\n')
+log_file.writelines('(Different camera, same folder. Owner might have changed camera. If shots are close in time it is probably a true error)\n')
 for e in anomaly_medium:
-    log_file.writelines('{} and {}'.format(e[0], e[1]))
-log_file.writelines('')
-log_file.writelines('')
-log_file.writelines('======== WEAK ANOMALY ========')
-log_file.writelines('(Long time between shot. Might just be different shooting sessions)')
+    log_file.writelines('{} and {}\n'.format(e[0], e[1]))
+log_file.writelines('\n')
+log_file.writelines('\n')
+log_file.writelines('======== WEAK ANOMALY ========\n')
+log_file.writelines('(Long time between shot. Might just be different shooting sessions)\n')
 for e in anomaly_weak:
-    log_file.writelines('{} and {}'.format(e[0], e[1]))
+    log_file.writelines('{} and {}\n'.format(e[0], e[1]))
 
 log_file.close()
