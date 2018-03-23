@@ -1,4 +1,5 @@
 import keras
+import cv2
 import numpy as np
 from keras.datasets import mnist
 
@@ -126,6 +127,7 @@ full_output_enc = enc1(full_output_enc)
 #Create the model and compile
 full = Model(inputs=full_input, outputs=[full_output_img, full_output_disc, full_output_enc])
 full.compile(optimizer=keras.optimizers.Adadelta(),
+             metrics=None,
              loss=[keras.losses.mean_squared_error, 
                    keras.losses.categorical_crossentropy,
                    keras.losses.mean_squared_error],
@@ -143,6 +145,55 @@ full.summary()
 
 
 #Train Step
+#Classifier
+#model.fit(x_train, y_train,
+#          batch_size=batch_size,
+#          epochs=1,
+#          verbose=1,
+#          validation_data=(x_test, y_test))
+
+#Generate encoded version (enc1) of the dataset
+h_train = enc1.predict(x_train)
+h_test = enc1.predict(x_test)
+
+#GAN
+report_freq = 500
+half_batch = 32
+g_epochs=2000
+disc_loss = []
+gen_loss = []
+for e in range(g_epochs):
+    #Train the discriminator
+    idX = np.random.randint(0, x_train.shape[0], half_batch)
+    
+    valid = x_train[idX]
+    fake = g_gen.predict(enc2.predict(h_train[idX]))
+    
+    v_ret = g_disc.train_on_batch(valid, keras.utils.to_categorical(np.ones ((half_batch)), 2))
+    f_ret = g_disc.test_on_batch(fake,   keras.utils.to_categorical(np.zeros((half_batch)), 2))
+    disc_loss.append(v_ret[0]*0.5 + f_ret[0]*0.5)
+    
+    #Train the GAN on a full batch
+    idX = np.random.randint(0, x_train.shape[0], 2*half_batch)
+    full_loss = full.train_on_batch(x_train[idX], [x_train[idX], 
+                                                   keras.utils.to_categorical(np.ones((2*half_batch)), 2),
+                                                   h_train[idX]])
+    gen_loss.append(full_loss)
+    
+    if e % report_freq == 0:
+        print(':::: Epoch #{} report ::::'.format(e))
+        print('GAN losses --- disc: {:.2f} // gen:{:.2f}'.format(disc_loss[-1], gen_loss[-1][2]))
+        print('Reconstruction losses --- img: {:.2f} // h1: {:.2f}'.format(gen_loss[-1][1], gen_loss[-1][3]))
+        
+        saveImg = np.concatenate((valid, fake), axis=2)
+        saveImg = np.vstack(saveImg)
+        saveImg = saveImg*255
+        saveImg[saveImg<0] = 0
+        saveImg[saveImg>255] = 255
+        cv2.imwrite('epoch_{}.bmp'.format(e), saveImg)
+        
+    
+    
 
 
 
@@ -153,11 +204,20 @@ full.summary()
 
 
 
-model.fit(x_train, y_train,
-          batch_size=batch_size,
-          epochs=epochs,
-          verbose=1,
-          validation_data=(x_test, y_test))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
