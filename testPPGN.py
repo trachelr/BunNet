@@ -146,11 +146,11 @@ full.summary()
 
 #Train Step
 #Classifier
-#model.fit(x_train, y_train,
-#          batch_size=batch_size,
-#          epochs=1,
-#          verbose=1,
-#          validation_data=(x_test, y_test))
+model.fit(x_train, y_train,
+          batch_size=batch_size,
+          epochs=epochs,
+          verbose=1,
+          validation_data=(x_test, y_test))
 
 #Generate encoded version (enc1) of the dataset
 h_train = enc1.predict(x_train)
@@ -159,7 +159,7 @@ h_test = enc1.predict(x_test)
 #GAN
 report_freq = 500
 half_batch = 32
-g_epochs=2000
+g_epochs=30000
 disc_loss = []
 gen_loss = []
 for e in range(g_epochs):
