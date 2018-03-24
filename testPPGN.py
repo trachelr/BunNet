@@ -1,6 +1,7 @@
 import keras
 import cv2
 import numpy as np
+import keras.backend as K
 from keras.datasets import mnist
 
 from sklearn.preprocessing import Normalizer
@@ -191,6 +192,75 @@ for e in range(g_epochs):
         saveImg[saveImg<0] = 0
         saveImg[saveImg>255] = 255
         cv2.imwrite('epoch_{}.bmp'.format(e), saveImg)
+        
+
+#Sampling
+#First create the sampler
+sampler_input = Input((g_gen.input_shape[1],))
+sampler_output = sampler_input
+sampler_output = g_gen(sampler_output)
+sampler_output = model(sampler_output)
+sampler = Model(inputs=sampler_input, outputs=sampler_output)
+sampler.trainable=False #Just in case
+sampler.compile(optimizer=keras.optimizers.Adadelta(), loss=keras.losses.categorical_crossentropy) #We need to compile for the forward/backward pass
+
+#For now take an arbitrary data point
+H = enc2.predict(enc1.predict(x_test[1:2]))
+Y = np.reshape(np.roll(y_test[1], 1), (1,10)) #And aim toward the next number
+
+#This is a bit of keras/TF dark magic, bear with me
+#Also see https://github.com/keras-team/keras/issues/2226
+#We define a keras function that return the gradient after a Fwd/Bwd pass
+weights = sampler.weights
+grad = sampler.optimizer.get_gradients(sampler.total_loss, weights)
+input_tensors = [sampler.inputs[0],
+                 sampler.sample_weights[0],
+                 sampler.targets[0],
+                 K.learning_phase()]
+get_gradients = K.function(inputs=input_tensors, outputs=grad)
+
+#Print the stating image
+img = g_gen.predict(H)
+img = img * 255
+img[img<0] = 0
+img[img>255] = 255
+img = img.astype('int')
+cv2.imwrite('sample_base.bmp', img[0])
+
+#Sampling
+samples = 1e6
+#espilon values are from paper
+eps1 = np.float64(1-3)
+eps2 = np.float64(1)
+eps3 = np.float64(1e-6)
+for s in range(samples):
+    #term1 is the reconstruction error
+    term1 = enc2.predict(enc1.predict(g_gen.predict(H)))
+    
+    #term2 is the gradient after a fwd/bwd pass
+    inputs = [H, [1], Y, 1] #[Sample, sample_weight, target, learning_phase] see input_tensors' def
+    #Take the gradient at input level. [0] refers to the first layer, hence the sum over all neuron in that layer
+    term2 = get_gradients(inputs)[0].sum(axis=1) 
+    term2 = np.reshape(term2, (1, term2.shape[0]))
+    
+    #term3 is just noise
+    term3 = np.random.normal(0, eps3**2, H.shape)
+    
+    H_old = H
+    H = H + eps1*term1 + eps2*term2 + term3
+    
+    if s %5e5 == 0:
+        img_old = img
+        img = g_gen.predict(H)
+        img = img * 255
+        img[img<0] = 0
+        img[img>255] = 255
+        img = img.astype('int')
+        cv2.imwrite('sample_{}.bmp'.format(s/1e5), img[0])
+        print('H diff: {:.2f}, img diff: {:.2f}'.format(np.abs(H-H_old).sum(), np.abs(img-img_old).sum()))
+    
+    
+
         
     
     
