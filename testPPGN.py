@@ -238,7 +238,7 @@ for s in range(samples):
     term1 = enc2.predict(enc1.predict(g_gen.predict(H)))
     
     #term2 is the gradient after a fwd/bwd pass
-    inputs = [H, [1], Y, 1] #[Sample, sample_weight, target, learning_phase] see input_tensors' def
+    inputs = [H, [1], Y, 0] #[Sample, sample_weight, target, learning_phase] see input_tensors' def
     #Take the gradient at input level. [0] refers to the first layer, hence the sum over all neuron in that layer
     term2 = get_gradients(inputs)[0].sum(axis=1) 
     term2 = np.reshape(term2, (1, term2.shape[0]))
