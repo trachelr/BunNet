@@ -43,7 +43,7 @@ import numpy as np
 
 import keras
 import keras.backend as K
-from keras.models import Sequential, Model
+from keras.models import Model
 from keras.layers import Dense, Dropout, Flatten
 from keras.layers import Conv2D, MaxPooling2D
 from keras.layers import Input, UpSampling2D, Conv2DTranspose,  Reshape
@@ -170,15 +170,30 @@ class NoiselessJointPPGN:
         sampler_input = Input(self.h2_shape)
         sampler_output = sampler_input
         sampler_output = self.g_gen(sampler_output)
-        sampler_output = self.classifier(sampler_output)
+        for i in np.arange(1, self.out_ind+1, 1):
+            sampler_output = self.classifier.get_layer(index=i)(sampler_output)
         self.sampler = Model(inputs=sampler_input, outputs=sampler_output)
         self.sampler.trainable = False
         self.sampler.compile(loss=sampler_loss, optimizer=sampler_opti)
         
-        self._log('Created sampler network (not trainable) from g_gen and classifier', 2)
+        self._log('Created sampler network (not trainable) from g_gen and classifier (up to layer #{} included)'\
+                  .format(self.out_ind), 2)
         self._log('with input shape: {] and output shape: {}'\
                   .format(self.sampler.input_shape[1:], self.sampler.output_shape[1:]), 2)
         self._print_summary(self.sampler, 'sampler')
+        
+        #Create a custom keras/TF function to compute the gradient given a couple input/target wrt to all weights in the network
+        #This is a bit of keras/TF dark magic, bear with me
+        #Also see https://github.com/keras-team/keras/issues/2226
+        weights = self.sampler.weights
+        grads = self.sampler.optimizer.get_gradients(self.sampler.total_loss, weights)
+        input_tensors = [self.sampler.inputs[0],
+                         self.sampler.sample_weights[0],
+                         self.sampler.outputs[0],
+                         K.learning_phase()]
+        self.get_gradients = K.function(inputs=input_tensors, outputs=grads)
+        
+        self._log('Created fwd/bwd', 2)
         
         self._isCompiled=True       
         return
@@ -228,16 +243,113 @@ class NoiselessJointPPGN:
         self._print_summary(self.g_disc, 'GAN-discriminator')
     
     
-    def fit_classifier(self):
+    def fit_classifier(self, x_train, y_train, batch_size=64, epochs=10, verbose=1, validation_data=None):
+        self.classifier.fit(x_train, y_train,
+                            batch_size=batch_size,
+                            epochs=epochs,
+                            verbose=verbose,
+                            validation_data=validation_data)
         return
     
     
-    def fit_gan(self):
+    def fit_gan(self, x_train, batch_size=64, epochs=30000,
+                report_freq=500, train_procedure='Default'):
+        if train_procedure == 'Default':
+            train_procedure = self._defaultGANTrainProcedure
+            
+        h_train = self.enc1.predict(x_train)
+        
+        self.g_disc_loss = []
+        self.gan_loss = []
+        for e in range(epochs):
+            (dl, gl) = train_procedure(x_train, h_train, batch_size, self.g_disc, self.gan, e)
+            self.g_disc_loss.append(dl)
+            self.gan_loss.append(gl)
+            
+            #Produce a report
+            if report_freq!=-1 and e%report_freq==0:
+                self._log('fit_gan -- Epoch #{} report'.format(e), 0)
+                self._log('GAN losses -- disc: {:.2f} // gen: {:.2f}'\
+                          .format(self.g_disc_loss[-1], self.gan_loss[-1][2]), 0)
+                self._log('Reconstruction losses -- img: {:.2f} // h1: {:.2f}'\
+                          .format(self.gan_loss[-1][1], self.gan_loss[-1][3]), 0)
+                #TODO save images
+        
         return
     
     
-    def sample(self):
-        return
+    def sample(self, neuronID, epsilons=(1e-11, 1, 1e-17), nbSamples=100, h_start=None, report_freq=10):
+        #Draw a random starting point if needed
+        if h_start is None:
+            h_start = np.random.normal(0, 1, self.sampler.input_shape[1:])
+            
+        #Ensure correct shape
+        if h_start.ndim == len(self.sampler.input_shape)-1:
+            h_start = np.array([h_start])
+        elif h_start.ndim != len(self.sampler.input_shape):
+            self._log('ill-shaped h_start (has shape: {}, expected shape :{})'\
+                      .format(h_start.shape, self.sampler.input_shape), 0)
+            return
+        
+        #Compute output's target activation map
+        y = np.zeros((self.sampler.output_shape[1:]))
+        y = np.reshape(y, (y.size))
+        y[neuronID] = 1
+        y = np.reshape(y, (self.sampler.output_shape[1:]))
+        y = np.array([y])
+            
+        h = h_start
+        samples = []
+        for s in range(nbSamples):
+            #term0 is the reconstruction error of  h2
+            term0 = self.enc2.predict(self.enc1.predict(self.g_gen(h)))
+            term0 *= epsilons[0]
+            
+            #term1 is the gradient after a fwd/bwd pass
+            inputs = [h, [1], y, 0] #[Sample, sample_weight, target, learning_phase] see input_tensors' def in compile
+            term1 = self.get_gradients(inputs)[0].sum(axis=h.ndim-1)
+            term1 = np.array([term1])
+            term1 *= epsilons[1]
+            
+            #term2 is just noise
+            term2 = np.random.normal(0, epsilons[2]**2, h.shape)
+            
+            h_old = h
+            h = h_old + term0 + term1 + term2   
+            
+            samples.append(self.g_gen.predict(h)[0])
+        
+        return (samples, h)
+    
+    
+    #Alternate training between disc/gen
+    def _defaultGANTrainProcedure(self, x_train, h_train, batch_size, disc_model, gan_model, epochID):
+        half_batch = int(batch_size/2)
+        
+        #Train disc
+        idX_valid = np.random.randint(0, x_train.shape[0], half_batch)
+        idX_fake  = np.random.randint(0, x_train.shape[0], half_batch)
+        
+        valid = x_train[idX_valid]
+        fake  = x_train[idX_fake]
+        x_disc = np.concatenate((valid, fake), axis=0)
+        y_disc = np.concatenate((np.ones((half_batch)), np.zeros((half_batch))))
+        
+        shuffle = np.random.shuffle(np.arange(y_disc.shape[0]))
+        x_disc = x_disc[shuffle]
+        y_disc = y_disc[shuffle]
+        
+        disc_loss = disc_model.train_on_batch(x_disc, y_disc)
+        
+        #Train gan
+        idX_gan = np.random.randint(0, x_train.shape[0], 2*half_batch) #Use half_batch in case of rounding mismatch with batch_size
+        x_gan = x_train[idX_gan]
+        y_gan = np.ones((2*half_batch))
+        h_gan = h_train[idX_gan]
+        
+        gan_loss = gan_model.train_on_batch(x_gan, [x_gan, y_gan, h_gan])        
+        
+        return (disc_loss, gan_loss)    
     
     
     def _defaultGANgenerator(self):
