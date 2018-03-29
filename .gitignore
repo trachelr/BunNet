@@ -1,2 +1,4 @@
 
 *.bmp
+
+__pycache__/

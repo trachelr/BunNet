@@ -51,11 +51,11 @@ from keras.layers import Input, UpSampling2D, Conv2DTranspose,  Reshape
 class NoiselessJointPPGN:
     nextID = 0 #Static variable for identification and count
     
-    def __init(self, classifier, hidden1_index, hidden2_index, output_index,
-               gan_generator='Default', gan_discriminator='Default',
-               verbose=3, log_path=None, name=None): 
-        self.name = 'PPGN_{}'.format(NoiselessJointPPGN.netxID) if name is None else name
-        NoiselessJointPPGN.nextID+=1
+    def __init__(self, classifier, hidden1_index, hidden2_index, output_index,
+                 gan_generator='Default', gan_discriminator='Default',
+                 verbose=3, log_path=None, name=None): 
+        self.name = 'PPGN_{}'.format(type(self).nextID) if name is None else name
+        type(self).nextID+=1
         
         self.verbose=verbose
         self.log_path=log_path
@@ -137,7 +137,7 @@ class NoiselessJointPPGN:
                   .format(self.h1_ind+1, self.h2_ind), 2)
         self._log('with input shape: {}, output_shape: {}'.\
                   format(self.enc2.input_shape[1:], self.enc2.output_shape[1:]), 2)
-        self._print_summary(self.enc1, 'Encoder 1')
+        self._print_summary(self.enc2, 'Encoder 2')
         
         #Compile g_disc as trainable
         self.g_disc.trainable=True
@@ -163,7 +163,8 @@ class NoiselessJointPPGN:
         
         self._log('Created gan network (trainable) from enc1, enc2 g_disc and g_gen', 2)
         self._log('with input shape: {} and output shapes: image->{}, adversarial(disc)->{}, h1(encoder)->{}'\
-                  .format(self.gan.output_shape[0][1:], self.gan.output_shape[1][1:], self.gan.output_shape[2][1:]), 2)
+                  .format(self.gan.input_shape[1:], self.gan.output_shape[0][1:],\
+                          self.gan.output_shape[1][1:], self.gan.output_shape[2][1:]), 2)
         self._print_summary(self.gan, 'Full GAN')
         
         #Create the sampler network, freeze it and compile
@@ -178,7 +179,7 @@ class NoiselessJointPPGN:
         
         self._log('Created sampler network (not trainable) from g_gen and classifier (up to layer #{} included)'\
                   .format(self.out_ind), 2)
-        self._log('with input shape: {] and output shape: {}'\
+        self._log('with input shape: {} and output shape: {}'\
                   .format(self.sampler.input_shape[1:], self.sampler.output_shape[1:]), 2)
         self._print_summary(self.sampler, 'sampler')
         
@@ -189,11 +190,11 @@ class NoiselessJointPPGN:
         grads = self.sampler.optimizer.get_gradients(self.sampler.total_loss, weights)
         input_tensors = [self.sampler.inputs[0],
                          self.sampler.sample_weights[0],
-                         self.sampler.outputs[0],
+                         self.sampler.targets[0],
                          K.learning_phase()]
         self.get_gradients = K.function(inputs=input_tensors, outputs=grads)
         
-        self._log('Created fwd/bwd', 2)
+        self._log('Created fwd/bwd function', 2)
         
         self._isCompiled=True       
         return
@@ -244,6 +245,7 @@ class NoiselessJointPPGN:
     
     
     def fit_classifier(self, x_train, y_train, batch_size=64, epochs=10, verbose=1, validation_data=None):
+        #TODO add flag checks
         self.classifier.fit(x_train, y_train,
                             batch_size=batch_size,
                             epochs=epochs,
@@ -256,13 +258,15 @@ class NoiselessJointPPGN:
                 report_freq=500, train_procedure='Default'):
         if train_procedure == 'Default':
             train_procedure = self._defaultGANTrainProcedure
-            
-        h_train = self.enc1.predict(x_train)
+         #TODO add flag checks   
+        h1_train = self.enc1.predict(x_train)
         
         self.g_disc_loss = []
         self.gan_loss = []
+        source_samples = []
+        generated_samples = []
         for e in range(epochs):
-            (dl, gl) = train_procedure(x_train, h_train, batch_size, self.g_disc, self.gan, e)
+            (dl, gl) = train_procedure(x_train, h1_train, batch_size, self.g_disc, self.gan, e)
             self.g_disc_loss.append(dl)
             self.gan_loss.append(gl)
             
@@ -273,22 +277,25 @@ class NoiselessJointPPGN:
                           .format(self.g_disc_loss[-1], self.gan_loss[-1][2]), 0)
                 self._log('Reconstruction losses -- img: {:.2f} // h1: {:.2f}'\
                           .format(self.gan_loss[-1][1], self.gan_loss[-1][3]), 0)
-                #TODO save images
+                #Generate a bunch of sample to return
+                idX = np.random.randint(0, x_train.shape[0], 25)
+                source_samples.append(x_train[idX])
+                generated_samples.append(self.g_gen.predict(self.enc2.predict(h1_train[idX])))
         
-        return
+        return (source_samples, generated_samples)
     
     
-    def sample(self, neuronID, epsilons=(1e-11, 1, 1e-17), nbSamples=100, h_start=None, report_freq=10):
+    def sample(self, neuronID, epsilons=(1e-11, 1, 1e-17), nbSamples=100, h2_start=None, report_freq=10):
         #Draw a random starting point if needed
-        if h_start is None:
-            h_start = np.random.normal(0, 1, self.sampler.input_shape[1:])
+        if h2_start is None:
+            h2_start = np.random.normal(0, 1, self.sampler.input_shape[1:])
             
         #Ensure correct shape
-        if h_start.ndim == len(self.sampler.input_shape)-1:
-            h_start = np.array([h_start])
-        elif h_start.ndim != len(self.sampler.input_shape):
+        if h2_start.ndim == len(self.sampler.input_shape)-1:
+            h2_start = np.array([h2_start])
+        elif h2_start.ndim != len(self.sampler.input_shape):
             self._log('ill-shaped h_start (has shape: {}, expected shape :{})'\
-                      .format(h_start.shape, self.sampler.input_shape), 0)
+                      .format(h2_start.shape, self.sampler.input_shape), 0)
             return
         
         #Compute output's target activation map
@@ -298,32 +305,35 @@ class NoiselessJointPPGN:
         y = np.reshape(y, (self.sampler.output_shape[1:]))
         y = np.array([y])
             
-        h = h_start
+        h2 = h2_start
         samples = []
         for s in range(nbSamples):
             #term0 is the reconstruction error of  h2
-            term0 = self.enc2.predict(self.enc1.predict(self.g_gen(h)))
+            term0 = self.enc2.predict(self.enc1.predict(self.g_gen.predict(h2)))
             term0 *= epsilons[0]
             
             #term1 is the gradient after a fwd/bwd pass
-            inputs = [h, [1], y, 0] #[Sample, sample_weight, target, learning_phase] see input_tensors' def in compile
-            term1 = self.get_gradients(inputs)[0].sum(axis=h.ndim-1)
+            inputs = [h2, [1], y, 0] #[Sample, sample_weight, target, learning_phase] see input_tensors' def in compile
+            term1 = self.get_gradients(inputs)[0].sum(axis=h2.ndim-1)
             term1 = np.array([term1])
             term1 *= epsilons[1]
             
             #term2 is just noise
-            term2 = np.random.normal(0, epsilons[2]**2, h.shape)
+            term2 = np.random.normal(0, epsilons[2]**2, h2.shape)
             
-            h_old = h
-            h = h_old + term0 + term1 + term2   
+            h2_old = h2
+            h2 = h2_old + term0 + term1 + term2
             
-            samples.append(self.g_gen.predict(h)[0])
+            self._log('Sample #{}. h diff: {:.2f}, img diff: {:.2f}'\
+                      .format(s, np.abs(h2 - h2_old).sum(), np.abs(self.g_gen.predict(h2) - self.g_gen.predict(h2_old)).sum()), 2)
+            
+            samples.append(self.g_gen.predict(h2)[0])
         
-        return (samples, h)
+        return (samples, h2)
     
     
     #Alternate training between disc/gen
-    def _defaultGANTrainProcedure(self, x_train, h_train, batch_size, disc_model, gan_model, epochID):
+    def _defaultGANTrainProcedure(self, x_train, h1_train, batch_size, disc_model, gan_model, epochID):
         half_batch = int(batch_size/2)
         
         #Train disc
@@ -331,11 +341,12 @@ class NoiselessJointPPGN:
         idX_fake  = np.random.randint(0, x_train.shape[0], half_batch)
         
         valid = x_train[idX_valid]
-        fake  = x_train[idX_fake]
+        fake  = gan_model.predict(x_train[idX_fake])[0]
         x_disc = np.concatenate((valid, fake), axis=0)
         y_disc = np.concatenate((np.ones((half_batch)), np.zeros((half_batch))))
         
-        shuffle = np.random.shuffle(np.arange(y_disc.shape[0]))
+        shuffle = np.arange(0, y_disc.shape[0])
+        np.random.shuffle(shuffle)
         x_disc = x_disc[shuffle]
         y_disc = y_disc[shuffle]
         
@@ -345,9 +356,9 @@ class NoiselessJointPPGN:
         idX_gan = np.random.randint(0, x_train.shape[0], 2*half_batch) #Use half_batch in case of rounding mismatch with batch_size
         x_gan = x_train[idX_gan]
         y_gan = np.ones((2*half_batch))
-        h_gan = h_train[idX_gan]
+        h1_gan = h1_train[idX_gan]
         
-        gan_loss = gan_model.train_on_batch(x_gan, [x_gan, y_gan, h_gan])        
+        gan_loss = gan_model.train_on_batch(x_gan, [x_gan, y_gan, h1_gan])        
         
         return (disc_loss, gan_loss)    
     
