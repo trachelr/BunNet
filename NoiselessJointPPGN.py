@@ -324,8 +324,10 @@ class NoiselessJointPPGN:
             h2_old = h2
             h2 = h2_old + term0 + term1 + term2
             
-            self._log('Sample #{}. h diff: {:.2f}, img diff: {:.2f}'\
-                      .format(s, np.abs(h2 - h2_old).sum(), np.abs(self.g_gen.predict(h2) - self.g_gen.predict(h2_old)).sum()), 2)
+            if report_freq != -1 and s % report_freq == 0:
+                self._log('Sample #{}. h diff: {:.2f}, img diff: {:.2f}'\
+                          .format(s, np.abs(h2 - h2_old).sum(),\
+                                  np.abs(self.g_gen.predict(h2) - self.g_gen.predict(h2_old)).sum()), 2)
             
             samples.append(self.g_gen.predict(h2)[0])
         
