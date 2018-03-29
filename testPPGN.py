@@ -59,9 +59,9 @@ model.add(Dense(128, activation='relu'))
 model.add(Dropout(0.5))
 model.add(Dense(num_classes, activation='softmax'))
 
-ppgn = PPGN.NoiselessJointPPGN(model, 5, 7, 8, verbose=2)
+ppgn = PPGN.NoiselessJointPPGN(model, 2, 5, 8, verbose=2)
 ppgn.compile(clf_metrics=['accuracy'])
-ppgn.fit_classifier(x_train, y_train, validation_data=[x_test, y_test])
+ppgn.fit_classifier(x_train, y_train, validation_data=[x_test, y_test], epochs=5)
 
 src, gen = ppgn.fit_gan(x_train, epochs=2000)
 
