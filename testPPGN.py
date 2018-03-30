@@ -18,9 +18,9 @@ from keras.layers import Input, UpSampling2D, Conv2DTranspose,  Reshape
 
 #Test on MNIST for now
 
-batch_size = 128
+batch_size = 32
 num_classes = 10
-epochs = 12
+epochs = 15
 # input image dimensions
 img_rows, img_cols = 28, 28
 
@@ -36,10 +36,8 @@ x_test = x_test.astype('float32')
 
 #Take the min/max over each channel and normalize
 #Here it just means we divide by 256
-mini = x_train.min(axis=(0,1,2), keepdims=True)
-maxi = x_train.max(axis=(0,1,2), keepdims=True)
-x_train = (x_train - mini) / (maxi - mini)
-x_test =  (x_test  - mini) / (maxi - mini)
+x_train = ((x_train/255) - 0.5)*2
+x_test =  ((x_test/255) - 0.5)*2
 
 #categorical y
 y_train = keras.utils.to_categorical(y_train, num_classes)
@@ -48,22 +46,41 @@ y_test = keras.utils.to_categorical(y_test, num_classes)
 
 #Classifier
 model = Sequential()
-model.add(Conv2D(32, kernel_size=(3, 3),
-                 activation='relu',
-                 input_shape=input_shape))
-model.add(Conv2D(64, (3, 3), activation='relu'))
-model.add(MaxPooling2D(pool_size=(2, 2)))
-model.add(Dropout(0.25))
+model.add(Conv2D(64, (7,7), activation='relu', input_shape=input_shape, padding='valid'))
+model.add(Conv2D(128, (7,7), activation='relu', padding='valid'))
+model.add(MaxPooling2D((2,2)))
+model.add(Conv2D(256, (7,7), activation='relu', padding='valid'))
+model.add(MaxPooling2D((2,2)))
 model.add(Flatten())
-model.add(Dense(128, activation='relu'))
-model.add(Dropout(0.5))
-model.add(Dense(num_classes, activation='softmax'))
+model.add(Dense(64, activation='relu'))
+model.add(Dense(10, activation='softmax'))
 
-ppgn = PPGN.NoiselessJointPPGN(model, 2, 5, 8, verbose=2)
-ppgn.compile(clf_metrics=['accuracy'])
-ppgn.fit_classifier(x_train, y_train, validation_data=[x_test, y_test], epochs=5)
+g_gen = Sequential()
+g_gen.add(Dense(1600, activation='relu', input_shape=(64,)))
+g_gen.add(Reshape((5,5,64)))
+g_gen.add(Conv2DTranspose(512, (5,5),   activation='relu', padding='valid'))
+g_gen.add(Conv2DTranspose(256, (5,5),   activation='relu', padding='valid'))
+g_gen.add(Conv2DTranspose(256, (7,7),   activation='relu', padding='valid'))
+g_gen.add(Conv2DTranspose(1,   (10,10), activation='linear', padding='valid'))
 
-src, gen = ppgn.fit_gan(x_train, epochs=2000)
+g_disc = Sequential()
+g_disc.add(Conv2D(256, (3,3), activation='relu', input_shape=input_shape, padding='valid'))
+g_disc.add(Conv2D(256, (3,3), activation='relu', padding='valid'))
+g_disc.add(MaxPooling2D((2,2)))
+g_disc.add(Conv2D(256, (3,3), activation='relu', padding='valid'))
+g_disc.add(MaxPooling2D((2,2)))
+g_disc.add(Conv2D(512, (3,3), activation='relu', padding='valid'))
+g_disc.add(MaxPooling2D((2,2)))
+g_disc.add(Flatten())
+g_disc.add(Dense(1, activation='linear'))
+
+ppgn = PPGN.NoiselessJointPPGN(model, 6, 7, 8, verbose=2,
+                               gan_generator=g_gen, gan_discriminator=g_disc)
+ppgn.compile(clf_metrics=['accuracy'],
+             gan_loss_weight=[1, 1e-1, 2])
+ppgn.fit_classifier(x_train, y_train, validation_data=[x_test, y_test], epochs=15)
+
+src, gen = ppgn.fit_gan(x_train, epochs=5000)
 
 #Plot the losses
 plt.ion()
@@ -78,21 +95,22 @@ plt.legend(['total loss', 'img loss', 'gan loss', 'h loss'])
 for i in range(len(src)):
     src[i] = np.concatenate((src[i]), axis=0)
     gen[i] = np.concatenate((gen[i]), axis=0)
-    img = np.concatenate((src[i], gen[i]), axis=1)*255
+    img = (np.concatenate((src[i], gen[i]), axis=1)+1)*255/2
     img[img < 0  ] = 0
     img[img > 255] = 255
     cv2.imwrite('img/gan{}.bmp'.format(i), img)
 
-h2_base = None
+h2_base = ppgn.enc2.predict(ppgn.enc1.predict(x_test[0:1]))
+#h2_base=None
 for i in range(10):
-    samples, h2 = ppgn.sample(i, nbSamples=100, h2_start=h2_base)
+    samples, h2 = ppgn.sample(i, nbSamples=200, h2_start=h2_base, epsilons=(1e1, 1, 1e-15))
     h2_base = h2[-1]
-    img = np.concatenate((samples), axis=0)*255
+    img = (np.concatenate((samples), axis=0)+1)*255/2
     img[img < 0  ] = 0
     img[img > 255] = 255
     cv2.imwrite('img/samples{}.bmp'.format(i), img)
 
-    
+
 
 
 
@@ -177,7 +195,7 @@ for i in range(10):
 #full = Model(inputs=full_input, outputs=[full_output_img, full_output_disc, full_output_enc])
 #full.compile(optimizer=keras.optimizers.Adadelta(),
 #             metrics=None,
-#             loss=[keras.losses.mean_squared_error, 
+#             loss=[keras.losses.mean_squared_error,
 #                   keras.losses.categorical_crossentropy,
 #                   keras.losses.mean_squared_error],
 #             loss_weights=[1., 1., 1.])
@@ -214,33 +232,33 @@ for i in range(10):
 #for e in range(g_epochs):
 #    #Train the discriminator
 #    idX = np.random.randint(0, x_train.shape[0], half_batch)
-#    
+#
 #    valid = x_train[idX]
 #    fake = g_gen.predict(enc2.predict(h_train[idX]))
-#    
+#
 #    v_ret = g_disc.train_on_batch(valid, keras.utils.to_categorical(np.ones ((half_batch)), 2))
 #    f_ret = g_disc.test_on_batch(fake,   keras.utils.to_categorical(np.zeros((half_batch)), 2))
 #    disc_loss.append(v_ret[0]*0.5 + f_ret[0]*0.5)
-#    
+#
 #    #Train the GAN on a full batch
 #    idX = np.random.randint(0, x_train.shape[0], 2*half_batch)
-#    full_loss = full.train_on_batch(x_train[idX], [x_train[idX], 
+#    full_loss = full.train_on_batch(x_train[idX], [x_train[idX],
 #                                                   keras.utils.to_categorical(np.ones((2*half_batch)), 2),
 #                                                   h_train[idX]])
 #    gen_loss.append(full_loss)
-#    
+#
 #    if e % report_freq == 0:
 #        print(':::: Epoch #{} report ::::'.format(e))
 #        print('GAN losses --- disc: {:.2f} // gen:{:.2f}'.format(disc_loss[-1], gen_loss[-1][2]))
 #        print('Reconstruction losses --- img: {:.2f} // h1: {:.2f}'.format(gen_loss[-1][1], gen_loss[-1][3]))
-#        
+#
 #        saveImg = np.concatenate((valid, fake), axis=2)
 #        saveImg = np.vstack(saveImg)
 #        saveImg = saveImg*255
 #        saveImg[saveImg<0] = 0
 #        saveImg[saveImg>255] = 255
 #        cv2.imwrite('epoch_{}.bmp'.format(e), saveImg)
-#        
+#
 #
 ##Sampling
 ##First create the sampler
@@ -284,19 +302,19 @@ for i in range(10):
 #for s in range(samples):
 #    #term1 is the reconstruction error
 #    term1 = enc2.predict(enc1.predict(g_gen.predict(H)))
-#    
+#
 #    #term2 is the gradient after a fwd/bwd pass
 #    inputs = [H, [1], Y, 0] #[Sample, sample_weight, target, learning_phase] see input_tensors' def
 #    #Take the gradient at input level. [0] refers to the first layer, hence the sum over all neuron in that layer
-#    term2 = get_gradients(inputs)[0].sum(axis=1) 
+#    term2 = get_gradients(inputs)[0].sum(axis=1)
 #    term2 = np.reshape(term2, (1, term2.shape[0]))
-#    
+#
 #    #term3 is just noise
 #    term3 = np.random.normal(0, eps3**2, H.shape)
-#    
+#
 #    H_old = H
 #    H = H + eps1*term1 + eps2*term2 + term3
-#    
+#
 #    if s %5e5 == 0:
 #        img_old = img
 #        img = g_gen.predict(H)
@@ -306,39 +324,3 @@ for i in range(10):
 #        img = img.astype('int')
 #        cv2.imwrite('sample_{}.bmp'.format(s/1e5), img[0])
 #        print('H diff: {:.2f}, img diff: {:.2f}'.format(np.abs(H-H_old).sum(), np.abs(img-img_old).sum()))
-    
-    
-
-        
-    
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
