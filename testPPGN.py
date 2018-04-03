@@ -88,6 +88,7 @@ model.add(MaxPooling2D((2,2)))
 model.add(Flatten())
 model.add(Dense(64, activation='relu'))
 model.add(Dense(10, activation='softmax'))
+model.trainable=True
 
 g_gen = Sequential()
 g_gen.add(Dense(1600, activation='relu', input_shape=(64,)))
@@ -96,6 +97,7 @@ g_gen.add(Conv2DTranspose(512, (5,5),   activation='relu', padding='valid'))
 g_gen.add(Conv2DTranspose(256, (5,5),   activation='relu', padding='valid'))
 g_gen.add(Conv2DTranspose(256, (7,7),   activation='relu', padding='valid'))
 g_gen.add(Conv2DTranspose(1,   (10,10), activation='linear', padding='valid'))
+g_gen.trainable=True
 
 g_disc = Sequential()
 g_disc.add(Conv2D(256, (3,3), activation='relu', input_shape=input_shape, padding='valid'))
@@ -107,6 +109,7 @@ g_disc.add(Conv2D(512, (3,3), activation='relu', padding='valid'))
 g_disc.add(MaxPooling2D((2,2)))
 g_disc.add(Flatten())
 g_disc.add(Dense(1, activation='linear'))
+g_disc.trainable=True
 
 #Load weights and skip fit if possible
 skipFitClf=False
@@ -125,13 +128,13 @@ if 'g_gen.h5' in os.listdir('weights/') and 'g_disc.h5' in os.listdir('weights/'
 ppgn = PPGN.NoiselessJointPPGN(model, 6, 7, 8, verbose=2,
                                gan_generator=g_gen, gan_discriminator=g_disc)
 ppgn.compile(clf_metrics=['accuracy'],
-             gan_loss_weight=[1, 1e-1, 2])
+             gan_loss_weight=[1, 2, 1e-1])
 if not skipFitClf:
     ppgn.fit_classifier(x_train, y_train, validation_data=[x_test, y_test], epochs=15)
     ppgn.classifier.save_weights('weights/clf.h5')
 
 if not skipFitGAN:
-    src, gen = ppgn.fit_gan(x_train, epochs=5000, train_procedure=customGANTrain)
+    src, gen = ppgn.fit_gan(x_train, epochs=250, report_freq=10) #train_procedure=customGANTrain)
     ppgn.g_gen.save_weights('weights/g_gen.h5')
     ppgn.g_disc.save_weights('weights/g_disc.h5')
 
