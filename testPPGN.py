@@ -1,5 +1,6 @@
 import keras
 import cv2
+import os
 import numpy as np
 import keras.backend as K
 from keras.datasets import mnist
@@ -107,18 +108,32 @@ g_disc.add(MaxPooling2D((2,2)))
 g_disc.add(Flatten())
 g_disc.add(Dense(1, activation='linear'))
 
-##Load weights and skip fit if possible
-#skipFit=False
-#if 'model.h5' in os.listdir('./weights'):
+#Load weights and skip fit if possible
+skipFitClf=False
+skipFitGAN=False
+if 'clf.h5' in os.listdir('weights/'):
+    model.load_weights('weights/clf.h5')
+    skipFitClf=True
+    print('Loaded CLF weights from existing file, will skip training')
+if 'g_gen.h5' in os.listdir('weights/') and 'g_disc.h5' in os.listdir('weights/'):
+    g_gen.load_weights('weights/g_gen.h5')
+    g_disc.load_weights('weights/g_disc.h5')
+    skipFitGAN=True
+    print('Loaded GAN weights from existing file, will skip training')
     
 
 ppgn = PPGN.NoiselessJointPPGN(model, 6, 7, 8, verbose=2,
                                gan_generator=g_gen, gan_discriminator=g_disc)
 ppgn.compile(clf_metrics=['accuracy'],
              gan_loss_weight=[1, 1e-1, 2])
-ppgn.fit_classifier(x_train, y_train, validation_data=[x_test, y_test], epochs=15)
+if not skipFitClf:
+    ppgn.fit_classifier(x_train, y_train, validation_data=[x_test, y_test], epochs=15)
+    ppgn.classifier.save_weights('weights/clf.h5')
 
-src, gen = ppgn.fit_gan(x_train, epochs=5000, train_procedure=customGANTrain)
+if not skipFitGAN:
+    src, gen = ppgn.fit_gan(x_train, epochs=5000, train_procedure=customGANTrain)
+    ppgn.g_gen.save_weights('weights/g_gen.h5')
+    ppgn.g_disc.save_weights('weights/g_disc.h5')
 
 #Plot the losses
 plt.ion()
