@@ -237,10 +237,10 @@ class NoiselessJointPPGN:
 
         self._log('GAN network set !', 1)
         self._log('g_gen -- input_shape: {}, output_shape: {}'\
-                  .format(self.g_gen.input_shape[1:], self.g_gen.output_shape[:1]), 2)
+                  .format(self.g_gen.input_shape[1:], self.g_gen.output_shape[1:]), 2)
         self._print_summary(self.g_gen, 'GAN-generator')
         self._log('g_disc -- input_shape: {}, output_shape: {}'\
-                  .format(self.g_disc.input_shape[1:], self.g_disc.output_shape[:1]), 2)
+                  .format(self.g_disc.input_shape[1:], self.g_disc.output_shape[1:]), 2)
         self._print_summary(self.g_disc, 'GAN-discriminator')
 
 
