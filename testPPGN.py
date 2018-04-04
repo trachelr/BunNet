@@ -18,37 +18,29 @@ from keras.layers import Input, UpSampling2D, Conv2DTranspose,  Reshape
 ## Definbe custom GAN training procedure based on http://www.nada.kth.se/~ann/exjobb/hesam_pakdaman.pdf
 #Do 5 disc iterations for one gan iteration. Except for the 500 first epoch and every 500 subsequent epochs 
 #where disc is trained 100 times
-def customGANTrain(x_train, h1_train, batch_size, disc_model, gan_model, epochID):
-    half_batch = int(batch_size/2)
-    
+#Based on implementation found in https://github.com/hesampakdaman/ppgn-disc/blob/master/src/vanilla.py
+def customGANTrain(x_train, h1_train, batch_size, disc_model, gan_model, epochID):    
     disc_train = 100 if epochID < 25 or epochID % 500 else 5
     
     #train disc
-    for i in range(disc_train):
-        idX_valid = np.random.randint(0, x_train.shape[0], half_batch)
-        idX_fake  = np.random.randint(0, x_train.shape[0], half_batch)
+    idX = np.random.randint(0, x_train.shape[0], disc_train)
 
-        valid = x_train[idX_valid]
-        fake  = gan_model.predict(x_train[idX_fake])[0]
-        x_disc = np.concatenate((valid, fake), axis=0)
-        y_disc = np.concatenate((np.ones((half_batch)), np.zeros((half_batch))))
+    valid = x_train[idX]
+    fake  = gan_model.predict(x_train[idX])[0]
+    x_disc = np.concatenate((valid, fake), axis=0)
+    y_disc = np.concatenate((np.ones((disc_train)), np.zeros((disc_train))))
 
-        shuffle = np.arange(0, y_disc.shape[0])
-        np.random.shuffle(shuffle)
-        x_disc = x_disc[shuffle]
-        y_disc = y_disc[shuffle]
-
-        disc_loss = disc_model.train_on_batch(x_disc, y_disc)
+    disc_loss = disc_model.train_on_batch(x_disc, y_disc)
         
     #train gen
-    idX_gan = np.random.randint(0, x_train.shape[0], 2*half_batch) #Use half_batch in case of rounding mismatch with batch_size
-    x_gan = x_train[idX_gan]
-    y_gan = np.ones((2*half_batch))
-    h1_gan = h1_train[idX_gan]
+    x_gan = x_train[idX][-1:]
+    y_gan = np.ones((1))
+    h1_gan = h1_train[idX][-1:]
 
     gan_loss = gan_model.train_on_batch(x_gan, [x_gan, y_gan, h1_gan])
     
     return (disc_loss, gan_loss)
+
 
 #Test on MNIST for now
 
@@ -125,16 +117,16 @@ if 'g_gen.h5' in os.listdir('weights/') and 'g_disc.h5' in os.listdir('weights/'
     print('Loaded GAN weights from existing file, will skip training')
     
 
-ppgn = PPGN.NoiselessJointPPGN(model, 6, 7, 8, verbose=2,
-                               gan_generator=g_gen, gan_discriminator=g_disc)
+ppgn = PPGN.NoiselessJointPPGN(model, 6, 7, 8, verbose=2)#,
+                               #gan_generator=g_gen, gan_discriminator=g_disc)
 ppgn.compile(clf_metrics=['accuracy'],
-             gan_loss_weight=[0, 2, 0])
+             gan_loss_weight=[1, 2, 1e-1])
 if not skipFitClf:
     ppgn.fit_classifier(x_train, y_train, validation_data=[x_test, y_test], epochs=2)
     ppgn.classifier.save_weights('weights/clf.h5')
 
 if not skipFitGAN:
-    src, gen = ppgn.fit_gan(x_train, epochs=250, report_freq=10) #train_procedure=customGANTrain)
+    src, gen = ppgn.fit_gan(x_train, epochs=250, report_freq=10, train_procedure=customGANTrain)
     ppgn.g_gen.save_weights('weights/g_gen.h5')
     ppgn.g_disc.save_weights('weights/g_disc.h5')
 
