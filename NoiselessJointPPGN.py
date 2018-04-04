@@ -173,28 +173,29 @@ class NoiselessJointPPGN:
         sampler_output = self.g_gen(sampler_output)
         for i in np.arange(1, self.out_ind+1, 1):
             sampler_output = self.classifier.get_layer(index=i)(sampler_output)
+        sampler_output = Flatten()(sampler_output) #Force flatten the output
         self.sampler = Model(inputs=sampler_input, outputs=sampler_output)
         self.sampler.trainable = False
         self.sampler.compile(loss=sampler_loss, optimizer=sampler_opti)
 
         self._log('Created sampler network (not trainable) from g_gen and classifier (up to layer #{} included)'\
                   .format(self.out_ind), 2)
-        self._log('with input shape: {} and output shape: {}'\
+        self._log('with input shape: {} and (flattened) output shape: {}'\
                   .format(self.sampler.input_shape[1:], self.sampler.output_shape[1:]), 2)
         self._print_summary(self.sampler, 'sampler')
 
-        #Create a custom keras/TF function to compute the gradient given a couple input/target wrt to all weights in the network
-        #This is a bit of keras/TF dark magic, bear with me
-        #Also see https://github.com/keras-team/keras/issues/2226
-        weights = self.sampler.weights
-        grads = self.sampler.optimizer.get_gradients(self.sampler.total_loss, weights)
-        input_tensors = [self.sampler.inputs[0],
-                         self.sampler.sample_weights[0],
-                         self.sampler.targets[0],
-                         K.learning_phase()]
-        self.get_gradients = K.function(inputs=input_tensors, outputs=grads)
-
-        self._log('Created fwd/bwd function', 2)
+#        #Create a custom keras/TF function to compute the gradient given a couple input/target wrt to all weights in the network
+#        #This is a bit of keras/TF dark magic, bear with me
+#        #Also see https://github.com/keras-team/keras/issues/2226
+#        weights = self.sampler.weights
+#        grads = self.sampler.optimizer.get_gradients(self.sampler.total_loss, weights)
+#        input_tensors = [self.sampler.inputs[0],
+#                         self.sampler.sample_weights[0],
+#                         self.sampler.targets[0],
+#                         K.learning_phase()]
+#        self.get_gradients = K.function(inputs=input_tensors, outputs=grads)
+#
+#        self._log('Created fwd/bwd function', 2)
 
         self._isCompiled=True
         return
@@ -284,7 +285,6 @@ class NoiselessJointPPGN:
 
         return (source_samples, generated_samples)
 
-
     def sample(self, neuronID, epsilons=(1e-11, 1, 1e-17), nbSamples=100, h2_start=None, report_freq=10):
         #Draw a random starting point if needed
         if h2_start is None:
@@ -298,12 +298,14 @@ class NoiselessJointPPGN:
                       .format(h2_start.shape, self.sampler.input_shape), 0)
             return
 
-        #Compute output's target activation map
-        y = np.zeros((self.sampler.output_shape[1:]))
-        y = np.reshape(y, (y.size))
-        y[neuronID] = 1
-        y = np.reshape(y, (self.sampler.output_shape[1:]))
-        y = np.array([y])
+
+        #Create a TF function for the fwd/bwd pass.
+        #This is a bit of keras/TF dark magic, bear with me
+        #Also see https://github.com/keras-team/keras/issues/2226
+        conditional = K.log(self.sampler.outputs[0][:,neuronID])
+        input_h2 = self.sampler.inputs[0]
+        grads = K.gradients(conditional, [input_h2])
+        fwd_bwd_pass = K.function([input_h2], grads)
 
         h2 = h2_start
         samples = []
@@ -313,9 +315,7 @@ class NoiselessJointPPGN:
             term0 *= epsilons[0]
 
             #term1 is the gradient after a fwd/bwd pass
-            inputs = [h2, [1], y, 0] #[Sample, sample_weight, target, learning_phase] see input_tensors' def in compile
-            term1 = self.get_gradients(inputs)[0].sum(axis=h2.ndim-1)
-            term1 = np.array([term1])
+            term1 = fwd_bwd_pass([h2])[0]
             term1 *= epsilons[1]
 
             #term2 is just noise
