@@ -117,8 +117,8 @@ if 'g_gen.h5' in os.listdir('weights/') and 'g_disc.h5' in os.listdir('weights/'
     print('Loaded GAN weights from existing file, will skip training')
     
 
-ppgn = PPGN.NoiselessJointPPGN(model, 6, 7, 8, verbose=2)#,
-                               #gan_generator=g_gen, gan_discriminator=g_disc)
+ppgn = PPGN.NoiselessJointPPGN(model, 6, 7, 8, verbose=2,
+                               gan_generator=g_gen, gan_discriminator=g_disc)
 ppgn.compile(clf_metrics=['accuracy'],
              gan_loss_weight=[1, 2, 1e-1])
 if not skipFitClf:
@@ -126,27 +126,27 @@ if not skipFitClf:
     ppgn.classifier.save_weights('weights/clf.h5')
 
 if not skipFitGAN:
-    src, gen = ppgn.fit_gan(x_train, epochs=250, report_freq=10, train_procedure=customGANTrain)
+    src, gen = ppgn.fit_gan(x_train, epochs=1000, report_freq=100)#, train_procedure=customGANTrain)
     ppgn.g_gen.save_weights('weights/g_gen.h5')
     ppgn.g_disc.save_weights('weights/g_disc.h5')
 
-#Plot the losses
-plt.ion()
-plt.figure()
-plt.plot(np.array(ppgn.g_disc_loss))
-plt.plot(np.array(ppgn.gan_loss)[:, 2])
-plt.legend(['disc_loss', 'gen_loss'])
-plt.figure()
-plt.plot(np.array(ppgn.gan_loss))
-plt.legend(['total loss', 'img loss', 'gan loss', 'h loss'])
-
-for i in range(len(src)):
-    src[i] = np.concatenate((src[i]), axis=0)
-    gen[i] = np.concatenate((gen[i]), axis=0)
-    img = (np.concatenate((src[i], gen[i]), axis=1)+1)*255/2
-    img[img < 0  ] = 0
-    img[img > 255] = 255
-    cv2.imwrite('img/gan{}.bmp'.format(i), img)
+    #Plot some GAN metrics computed during fit
+    plt.ion()
+    plt.figure()
+    plt.plot(np.array(ppgn.g_disc_loss))
+    plt.plot(np.array(ppgn.gan_loss)[:, 2])
+    plt.legend(['disc_loss', 'gen_loss'])
+    plt.figure()
+    plt.plot(np.array(ppgn.gan_loss))
+    plt.legend(['total loss', 'img loss', 'gan loss', 'h loss'])
+    
+    for i in range(len(src)):
+        src[i] = np.concatenate((src[i]), axis=0)
+        gen[i] = np.concatenate((gen[i]), axis=0)
+        img = (np.concatenate((src[i], gen[i]), axis=1)+1)*255/2
+        img[img < 0  ] = 0
+        img[img > 255] = 255
+        cv2.imwrite('img/gan{}.bmp'.format(i), img)
 
 #h2_base = ppgn.enc2.predict(ppgn.enc1.predict(x_test[0:1]))
 ##h2_base=None
