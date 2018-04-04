@@ -311,14 +311,12 @@ class NoiselessJointPPGN:
             #term0 is the reconstruction error of  h2
             term0 = self.enc2.predict(self.enc1.predict(self.g_gen.predict(h2)))
             term0 *= epsilons[0]
-            print(term0)
 
             #term1 is the gradient after a fwd/bwd pass
             inputs = [h2, [1], y, 0] #[Sample, sample_weight, target, learning_phase] see input_tensors' def in compile
             term1 = self.get_gradients(inputs)[0].sum(axis=h2.ndim-1)
             term1 = np.array([term1])
             term1 *= epsilons[1]
-            print(term1)
 
             #term2 is just noise
             term2 = np.random.normal(0, epsilons[2]**2, h2.shape)
