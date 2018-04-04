@@ -173,7 +173,9 @@ class NoiselessJointPPGN:
         sampler_output = self.g_gen(sampler_output)
         for i in np.arange(1, self.out_ind+1, 1):
             sampler_output = self.classifier.get_layer(index=i)(sampler_output)
-        sampler_output = Flatten()(sampler_output) #Force flatten the output
+        #flatten the output if not flat already
+        if K.ndim(sampler_output) >= 3: 
+            sampler_output = Flatten()(sampler_output)
         self.sampler = Model(inputs=sampler_input, outputs=sampler_output)
         self.sampler.trainable = False
         self.sampler.compile(loss=sampler_loss, optimizer=sampler_opti)
