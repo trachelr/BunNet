@@ -2,3 +2,5 @@
 *.bmp
 
 __pycache__/
+
+*.h5
