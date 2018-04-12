@@ -21,7 +21,7 @@
 ## Main parameters are:
 ##  - classifier: the classifier network to use
 ##  - hidden1_index: the index of the classifier network's layer's OUTPUT used as the first AE target
-##  - hidden2_index: the index of the classifier network's layer's OUTPUT used as the second AE target
+##  - gen_layer_index: the index of the classifier network's layer's OUTPUT used as the second AE target
 ##  - output_index:  the index of the classifier network's layer's OUTPUT where the maximized neuron
 ##                   is located during the sampling procedure
 ##  - gan_generator (opt) : the generator part of the GAN network
@@ -39,6 +39,7 @@
 ## The verbose output can also be redirected to a file via the log_path parameter.
 ##
 
+import time, sys, os
 import numpy as np
 
 import keras
@@ -51,7 +52,7 @@ from keras.layers import Input, UpSampling2D, Conv2DTranspose,  Reshape
 class NoiselessJointPPGN:
     nextID = 0 #Static variable for identification and count
 
-    def __init__(self, classifier, hidden1_index, hidden2_index, output_index,
+    def __init__(self, classifier, hidden1_index, gen_layer_index, output_index,
                  gan_generator='Default', gan_discriminator='Default',
                  verbose=3, log_path=None, name=None):
         self.name = 'PPGN_{}'.format(type(self).nextID) if name is None else name
@@ -66,7 +67,7 @@ class NoiselessJointPPGN:
         self._classifierSet=False
         self._ganSet=False
 
-        self.set_classifier(classifier, hidden1_index, hidden2_index, output_index)
+        self.set_classifier(classifier, hidden1_index, gen_layer_index, output_index)
 
         self.set_GAN(gan_generator, gan_discriminator)
 
@@ -203,14 +204,14 @@ class NoiselessJointPPGN:
         return
 
 
-    def set_classifier(self, classifier, hidden1_index, hidden2_index, output_index):
+    def set_classifier(self, classifier, hidden1_index, gen_layer_index, output_index):
         self.input_shape = classifier.input_shape[1:]
 
         self.h1_ind = hidden1_index
         self.h1_shape = classifier.get_layer(index=hidden1_index).output_shape[1:]
 
-        self.h2_ind = hidden2_index
-        self.h2_shape = classifier.get_layer(index=hidden2_index).output_shape[1:]
+        self.h2_ind = gen_layer_index
+        self.h2_shape = classifier.get_layer(index=gen_layer_index).output_shape[1:]
 
         self.out_ind = output_index
         self.out_shape = classifier.get_layer(index=output_index).output_shape[1:]
@@ -258,7 +259,8 @@ class NoiselessJointPPGN:
 
 
     def fit_gan(self, x_train, batch_size=64, epochs=30000,
-                report_freq=500, train_procedure='Default'):
+                report_freq=500, train_procedure='Default',
+                save_in=None):
         if train_procedure == 'Default':
             train_procedure = self._defaultGANTrainProcedure
          #TODO add flag checks
@@ -285,6 +287,11 @@ class NoiselessJointPPGN:
                 source_samples.append(x_train[idX])
                 generated_samples.append(self.g_gen.predict(self.enc2.predict(h1_train[idX])))
 
+        if save_in is not None and os.path.exists(os.path.dirname(save_in)):
+            datetime = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
+            print('Saving weights to ' + save_in + datetime)
+            self.g_gen.save_weights(os.path.join(save_in, datetime + '_g_gen.h5'))
+            self.g_disc.save_weights(os.path.join(save_in, datetime + '_g_disc.h5'))
         return (source_samples, generated_samples)
 
 
@@ -317,13 +324,10 @@ class NoiselessJointPPGN:
             #term0 is the reconstruction error of  h2
             term0 = self.enc2.predict(self.enc1.predict(self.g_gen.predict(h2)))
             term0 *= epsilons[0]
-            self._log("L2-norm of term0={}".format(np.linalg.norm(term0)), 2)
-
 
             #term1 is the gradient after a fwd/bwd pass
             term1 = fwd_bwd_pass([h2])[0]
             term1 *= epsilons[1]
-            self._log("L2-norm of term1={}".format(np.linalg.norm(term1)), 2)
 
             #term2 is just noise
             term2 = np.random.normal(0, epsilons[2]**2, h2.shape)
@@ -334,6 +338,8 @@ class NoiselessJointPPGN:
             h2 += step_size/np.abs(d_h).mean() * d_h
 
             if report_freq != -1 and s % report_freq == 0:
+                self._log("L2-norm of term0={}".format(np.linalg.norm(term0)), 2)
+                self._log("L2-norm of term1={}".format(np.linalg.norm(term1)), 2)
                 self._log('Sample #{}. h diff: {:.2f}, img diff: {:.2f}'\
                           .format(s, np.abs(h2 - h2_old).sum(),\
                                   np.abs(self.g_gen.predict(h2) - self.g_gen.predict(h2_old)).sum()), 2)
@@ -348,8 +354,10 @@ class NoiselessJointPPGN:
         half_batch = int(batch_size/2)
 
         #Train disc
-        idX_valid = np.random.randint(0, x_train.shape[0], half_batch)
-        idX_fake  = np.random.randint(0, x_train.shape[0], half_batch)
+        idX = np.arange(x_train.shape[0])
+        np.random.shuffle(idX) # Shuffle to avoid redundancy in labels
+        idX_valid = idX[:half_batch]
+        idX_fake = idX[half_batch:batch_size]
 
         valid = x_train[idX_valid]
         fake  = gan_model.predict(x_train[idX_fake])[0]

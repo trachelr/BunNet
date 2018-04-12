@@ -8,7 +8,7 @@ from matplotlib import pylab as plt
 
 import NoiselessJointPPGN as PPGN
 
-from sklearn.preprocessing import Normalizer
+from sklearn.preprocessing import Normalizer, StandardScaler
 
 from keras.models import Sequential, Model
 from keras.layers import Dense, Dropout, Flatten
@@ -29,7 +29,34 @@ def customGANTrain(x_train, h1_train, batch_size, disc_model, gan_model, epochID
     fake  = gan_model.predict(x_train[idX])[0]
     x_disc = np.concatenate((valid, fake), axis=0)
     y_disc = np.concatenate((np.ones((disc_train)), np.zeros((disc_train))))
+    disc_loss = disc_model.train_on_batch(x_disc, y_disc)
+    if epochID % 100 == 0:
+        print("mean real/fake {}/{}".format(valid.mean(), fake.mean()))
 
+    #train gen
+    idX = np.random.randint(0, x_train.shape[0], disc_train)
+    x_gan = x_train[idX]#[-1:]
+    y_gan = np.ones((len(idX)))#((1))
+    h1_gan = h1_train[idX]#[-1:]
+
+    gan_loss = gan_model.train_on_batch(x_gan, [x_gan, y_gan, h1_gan])
+
+    return (disc_loss, gan_loss)
+
+# GAN training procedure based on A. Dosovitskiy and T. Brox (NIPS 2016)
+# Generating Images with Perceptual Similarity Metrics based on Deep Networks
+# Reference and code available at https://lmb.informatik.uni-freiburg.de/Publications/2016/DB16c/
+train_disc, train_gen = True, True
+def DeepSIM_GANTrain(x_train, h1_train, batch_size, disc_model, gan_model, epochID):
+    disc_train = 100 if epochID < 25 or epochID % 500 else 5
+
+    #train disc
+    idX = np.random.randint(0, x_train.shape[0], disc_train)
+
+    valid = x_train[idX]
+    fake  = gan_model.predict(x_train[idX])[0]
+    x_disc = np.concatenate((valid, fake), axis=0)
+    y_disc = np.concatenate((np.ones((disc_train)), np.zeros((disc_train))))
     disc_loss = disc_model.train_on_batch(x_disc, y_disc)
 
     #train gen
@@ -39,11 +66,26 @@ def customGANTrain(x_train, h1_train, batch_size, disc_model, gan_model, epochID
 
     gan_loss = gan_model.train_on_batch(x_gan, [x_gan, y_gan, h1_gan])
 
+    # Perceptual Loss ratio
     return (disc_loss, gan_loss)
 
+# discr_loss_ratio = (discr_real_loss + discr_fake_loss) / discr_fake_for_generator_loss
+# if discr_loss_ratio < 1e-1 and train_discr:
+#   train_discr = False
+#   train_gen = True
+#   print "<<< real_loss=%e, fake_loss=%e, fake_loss_for_generator=%e, train_discr=%d, train_gen=%d >>>" % (discr_real_loss, discr_fake_loss, discr_fake_for_generator_loss, train_discr, train_gen)
+# if discr_loss_ratio > 5e-1 and not train_discr:
+#   train_discr = True
+#   train_gen = True
+#   print " <<< real_loss=%e, fake_loss=%e, fake_loss_for_generator=%e, train_discr=%d, train_gen=%d >>>" % (discr_real_loss, discr_fake_loss, discr_fake_for_generator_loss, train_discr, train_gen)
+# if discr_loss_ratio > 1e1 and train_gen:
+#   train_gen = False
+#   train_discr = True
+#   print "<<< real_loss=%e, fake_loss=%e, fake_loss_for_generator=%e, train_discr=%d, train_gen=%d >>>" % (discr_real_loss, discr_fake_loss, discr_fake_for_generator_loss, train_discr, train_gen)
 
-#Test on MNIST for now
-batch_size = 32
+
+#Test on dataset les Feuilles
+batch_size = 64
 num_classes = 14
 epochs = 15
 # input image dimensions
@@ -73,15 +115,25 @@ input_shape = (img_rows, img_cols, 1)
 x_train = x_train.astype('float32')
 x_test = x_test.astype('float32')
 
-#Take the min/max over each channel and normalize
-#Here it just means we divide by 256
-x_train = ((x_train/255) - 0.5)*2
-x_test =  ((x_test/255) - 0.5)*2
+img_mean = x_train.mean()
+img_scale = x_train.std()
+
+# sc = StandardScaler()
+# sc.fit(x_train.reshape(x_train.shape[0], -1))
+# img_mean  = sc.mean_.reshape(img_rows, img_cols, 1)
+# img_scale = sc.scale_.reshape(img_rows, img_cols, 1)
+#
+x_train = (x_train - img_mean) / img_scale
+x_test = (x_test - img_mean) / img_scale
+
+# or take the min/max over each channel and normalize
+# Here it just means we divide by 256
+# x_train = ((x_train/255) - 0.5)*2
+# x_test =  ((x_test/255) - 0.5)*2
 
 #categorical y
 y_train = keras.utils.to_categorical(y_train, num_classes)
 y_test = keras.utils.to_categorical(y_test, num_classes)
-
 
 #Classifier
 model = Sequential()
@@ -90,8 +142,6 @@ model.add(Conv2D(128, (7,7), activation='relu', padding='valid'))
 model.add(MaxPooling2D((2,2)))
 model.add(Conv2D(256, (7,7), activation='relu', padding='valid'))
 model.add(MaxPooling2D((2,2)))
-#model.add(Conv2D(256, (7,7), activation='relu', padding='valid'))
-#model.add(MaxPooling2D((2,2)))
 model.add(Flatten())
 model.add(Dense(64, activation='relu'))
 model.add(Dense(num_classes, activation='softmax'))
@@ -105,12 +155,6 @@ g_gen.add(Conv2DTranspose(256, (5,5),   activation='relu', padding='valid'))
 g_gen.add(Conv2DTranspose(256, (7,7),   activation='relu', padding='valid'))
 g_gen.add(Conv2DTranspose(1,   (10,10), activation='linear', padding='valid'))
 g_gen.trainable=True
-# g_gen.add(Conv2DTranspose(512, (5,5), activation='relu', padding='valid'))
-# g_gen.add(Conv2DTranspose(256, (5,5), activation='relu', padding='valid'))
-# g_gen.add(UpSampling2D((2, 2)))
-# g_gen.add(Conv2DTranspose(256, (5,5), activation='relu', padding='valid'))
-# g_gen.add(UpSampling2D((2, 2)))
-# g_gen.add(Conv2DTranspose(1, (5,5), activation='linear', padding='valid'))
 
 g_disc = Sequential()
 g_disc.add(Conv2D(256, (3,3), activation='relu', input_shape=input_shape, padding='valid'))
@@ -125,7 +169,7 @@ g_disc.add(Dense(1, activation='linear'))
 g_disc.trainable=True
 
 #Load weights and skip fit if possible
-skipFitClf=False
+skipFitClf=True
 skipFitGAN=False
 if skipFitClf and 'clf_feuilles.h5' in os.listdir('weights/'):
     model.load_weights('weights/clf_feuilles.h5')
@@ -139,23 +183,24 @@ if skipFitGAN and 'g_gen_feuilles.h5' in os.listdir('weights/') and 'g_disc_feui
 
 
 ppgn = PPGN.NoiselessJointPPGN(model, 6, 7, 8, verbose=2,
-#                               gan_generator='Default', gan_discriminator='Default')
-                               gan_generator=g_gen, gan_discriminator=g_disc)
+                               gan_generator='Default', gan_discriminator='Default')
+#                               gan_generator=g_gen, gan_discriminator=g_disc)
 
 ppgn.compile(clf_metrics=['accuracy'],
              gan_loss_weight=[1, 2, 1e-1])
 
 if not skipFitClf:
     print('Fitting classifier')
-    ppgn.fit_classifier(x_train, y_train, validation_data=[x_test, y_test], epochs=15)
+    ppgn.fit_classifier(x_train, y_train, validation_data=[x_test, y_test], epochs=20)
     ppgn.classifier.save_weights('weights/clf_feuilles.h5')
 
 if not skipFitGAN:
     print('Fitting GAN')
-    src, gen = ppgn.fit_gan(x_train, epochs=2500, report_freq=100)#, train_procedure=customGANTrain)
-    #src, gen = ppgn.fit_gan(x_train, epochs=2500, report_freq=100, train_procedure=customGANTrain)
-    ppgn.g_gen.save_weights('weights/g_gen_feuilles.h5')
-    ppgn.g_disc.save_weights('weights/g_disc_feuilles.h5')
+    #src, gen = ppgn.fit_gan(x_train, batch_size=256, epochs=2500, report_freq=100)#, train_procedure=customGANTrain)
+    src, gen = ppgn.fit_gan(x_train, epochs=2500, report_freq=100,
+                            train_procedure=customGANTrain, save_in='weights/')
+    #ppgn.g_gen.save_weights('weights/g_gen_feuilles.h5')
+    #ppgn.g_disc.save_weights('weights/g_disc_feuilles.h5')
 
     #Plot some GAN metrics computed during fit
     plt.ion()
@@ -168,24 +213,29 @@ if not skipFitGAN:
     plt.legend(['total loss', 'img loss', 'gan loss', 'h loss'])
 
     for i in range(len(src)):
-        src[i] = np.concatenate((src[i]), axis=0)
-        gen[i] = np.concatenate((gen[i]), axis=0)
-        img = (np.concatenate((src[i], gen[i]), axis=1)+1)*255/2
+        src[i] = np.concatenate((src[i] * img_scale + img_mean), axis=0)
+        gen[i] = np.concatenate((gen[i] * img_scale + img_mean), axis=0)
+        img = np.concatenate((src[i], gen[i]), axis=1)
+        #src[i] = np.concatenate((src[i]), axis=0)
+        #gen[i] = np.concatenate((gen[i]), axis=0)
+        #img = (np.concatenate((src[i], gen[i]), axis=1)*255)#+1)*255/2
         img[img < 0  ] = 0
         img[img > 255] = 255
         cv2.imwrite('img/feuilles_gan{}.bmp'.format(i), img)
 
 h2_base = ppgn.enc2.predict(ppgn.enc1.predict(x_test[0:1]))
-h2_base=None
+# h2_base=None
 for i in range(num_classes):
     samples, h2 = ppgn.sample(i, nbSamples=100,
                               h2_start=h2_base,
-                              epsilons=(1e-2, 1, 1e-15),
-                              lr=.5, lr_end=.5)
+                              epsilons=(1e-6, 1, 1e-15),
+                              lr=1, lr_end=1)
     h2_base = None#h2[-1]
-    img = (np.concatenate((samples), axis=0)+1)*255/2
+    img = np.concatenate(np.array(samples) * img_scale + img_mean, axis=0)
+    print("min/max generated: {}/{}".format(img.min(), img.max()))
+    #img = (np.concatenate((samples), axis=0)*255)#+1)*255/2
     img[img < 0  ] = 0
     img[img > 255] = 255
     img_grid = img.reshape(input_shape[0]*10, input_shape[1]*10, 1)
     fname = 'img/feuilles_{}x{}samples{}.bmp'.format(input_shape[0], input_shape[1], i)
-    cv2.imwrite(fname, img_grid)
+    cv2.imwrite(fname, cv2.resize(img_grid, (160, 280)))

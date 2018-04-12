@@ -104,8 +104,8 @@ g_disc.add(Dense(1, activation='linear'))
 g_disc.trainable=True
 
 #Load weights and skip fit if possible
-skipFitClf=True
-skipFitGAN=True
+skipFitClf=False
+skipFitGAN=False
 if skipFitClf and 'clf.h5' in os.listdir('weights/'):
     model.load_weights('weights/clf.h5')
     skipFitClf=True
