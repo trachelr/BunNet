@@ -174,7 +174,7 @@ class NoiselessJointPPGN:
         for i in np.arange(1, self.out_ind+1, 1):
             sampler_output = self.classifier.get_layer(index=i)(sampler_output)
         #flatten the output if not flat already
-        if K.ndim(sampler_output) >= 3: 
+        if K.ndim(sampler_output) >= 3:
             sampler_output = Flatten()(sampler_output)
         self.sampler = Model(inputs=sampler_input, outputs=sampler_output)
         self.sampler.trainable = False
@@ -276,7 +276,7 @@ class NoiselessJointPPGN:
             #Produce a report
             if report_freq!=-1 and e%report_freq==0:
                 self._log('fit_gan -- Epoch #{} report'.format(e), 0)
-                self._log('GAN losses -- disc: {:.2f} // gen: {:.2f}'\
+                self._log('GAN losses -- disc: {:.2e} // gen: {:.2e}'\
                           .format(self.g_disc_loss[-1], self.gan_loss[-1][2]), 0)
                 self._log('Reconstruction losses -- img: {:.2f} // h1: {:.2f}'\
                           .format(self.gan_loss[-1][1], self.gan_loss[-1][3]), 0)
@@ -288,7 +288,8 @@ class NoiselessJointPPGN:
         return (source_samples, generated_samples)
 
 
-    def sample(self, neuronID, epsilons=(1e-11, 1, 1e-17), nbSamples=100, h2_start=None, report_freq=10):
+    def sample(self, neuronID, epsilons=(1e-11, 1, 1e-17),
+                nbSamples=100, h2_start=None, report_freq=10, lr=1, lr_end=1):
         #Draw a random starting point if needed
         if h2_start is None:
             h2_start = np.random.normal(0, 1, self.sampler.input_shape[1:])
@@ -300,7 +301,6 @@ class NoiselessJointPPGN:
             self._log('ill-shaped h_start (has shape: {}, expected shape :{})'\
                       .format(h2_start.shape, self.sampler.input_shape), 0)
             return
-
 
         #Create a TF function for the fwd/bwd pass.
         #This is a bit of keras/TF dark magic, bear with me

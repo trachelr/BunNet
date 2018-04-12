@@ -1,6 +1,6 @@
 import keras
 import cv2
-import os
+import os, h5py
 import numpy as np
 import keras.backend as K
 from keras.datasets import mnist
@@ -43,15 +43,28 @@ def customGANTrain(x_train, h1_train, batch_size, disc_model, gan_model, epochID
 
 
 #Test on MNIST for now
-
 batch_size = 32
-num_classes = 10
+num_classes = 14
 epochs = 15
 # input image dimensions
 img_rows, img_cols = 28, 28
-
+data_path = '/home/romain/Projects/cda_bn2018/data/h5py/'
+fname = '/gray_%ix%i.hdf5' %(img_rows, img_cols)
 #Get the data and reshape/convert/normalize
-(x_train, y_train), (x_test, y_test) = mnist.load_data()
+data = h5py.File(data_path + fname, "r")
+n_train = len(data['x_train'])
+idx = np.arange(n_train)
+np.random.shuffle(idx)
+x_train = np.array(data['x_train'])[idx]
+y_train = np.array(data['y_train'])[idx]
+n_test = len(data['x_test'])
+idx = np.arange(n_test)
+np.random.shuffle(idx)
+x_test = np.array(data['x_test'])[idx]
+y_test = np.array(data['y_test'])[idx]
+n_train, n_test = y_train.shape[0], y_test.shape[0]
+print('train images: %i' %n_train)
+print('test images: %i' %n_test)
 
 x_train = x_train.reshape(x_train.shape[0], img_rows, img_cols, 1)
 x_test = x_test.reshape(x_test.shape[0], img_rows, img_cols, 1)
@@ -77,9 +90,11 @@ model.add(Conv2D(128, (7,7), activation='relu', padding='valid'))
 model.add(MaxPooling2D((2,2)))
 model.add(Conv2D(256, (7,7), activation='relu', padding='valid'))
 model.add(MaxPooling2D((2,2)))
+#model.add(Conv2D(256, (7,7), activation='relu', padding='valid'))
+#model.add(MaxPooling2D((2,2)))
 model.add(Flatten())
 model.add(Dense(64, activation='relu'))
-model.add(Dense(10, activation='softmax'))
+model.add(Dense(num_classes, activation='softmax'))
 model.trainable=True
 
 g_gen = Sequential()
@@ -90,6 +105,12 @@ g_gen.add(Conv2DTranspose(256, (5,5),   activation='relu', padding='valid'))
 g_gen.add(Conv2DTranspose(256, (7,7),   activation='relu', padding='valid'))
 g_gen.add(Conv2DTranspose(1,   (10,10), activation='linear', padding='valid'))
 g_gen.trainable=True
+# g_gen.add(Conv2DTranspose(512, (5,5), activation='relu', padding='valid'))
+# g_gen.add(Conv2DTranspose(256, (5,5), activation='relu', padding='valid'))
+# g_gen.add(UpSampling2D((2, 2)))
+# g_gen.add(Conv2DTranspose(256, (5,5), activation='relu', padding='valid'))
+# g_gen.add(UpSampling2D((2, 2)))
+# g_gen.add(Conv2DTranspose(1, (5,5), activation='linear', padding='valid'))
 
 g_disc = Sequential()
 g_disc.add(Conv2D(256, (3,3), activation='relu', input_shape=input_shape, padding='valid'))
@@ -104,15 +125,15 @@ g_disc.add(Dense(1, activation='linear'))
 g_disc.trainable=True
 
 #Load weights and skip fit if possible
-skipFitClf=True
-skipFitGAN=True
-if skipFitClf and 'clf.h5' in os.listdir('weights/'):
-    model.load_weights('weights/clf.h5')
+skipFitClf=False
+skipFitGAN=False
+if skipFitClf and 'clf_feuilles.h5' in os.listdir('weights/'):
+    model.load_weights('weights/clf_feuilles.h5')
     skipFitClf=True
     print('Loaded CLF weights from existing file, will skip training')
-if skipFitGAN and 'g_gen.h5' in os.listdir('weights/') and 'g_disc.h5' in os.listdir('weights/'):
-    g_gen.load_weights('weights/g_gen.h5')
-    g_disc.load_weights('weights/g_disc.h5')
+if skipFitGAN and 'g_gen_feuilles.h5' in os.listdir('weights/') and 'g_disc_feuilles.h5' in os.listdir('weights/'):
+    g_gen.load_weights('weights/g_gen_feuilles.h5')
+    g_disc.load_weights('weights/g_disc_feuilles.h5')
     skipFitGAN=True
     print('Loaded GAN weights from existing file, will skip training')
 
@@ -127,16 +148,17 @@ ppgn.compile(clf_metrics=['accuracy'],
 if not skipFitClf:
     print('Fitting classifier')
     ppgn.fit_classifier(x_train, y_train, validation_data=[x_test, y_test], epochs=15)
-    ppgn.classifier.save_weights('weights/clf.h5')
+    ppgn.classifier.save_weights('weights/clf_feuilles.h5')
 
 if not skipFitGAN:
     print('Fitting GAN')
     src, gen = ppgn.fit_gan(x_train, epochs=2500, report_freq=100)#, train_procedure=customGANTrain)
-    ppgn.g_gen.save_weights('weights/g_gen.h5')
-    ppgn.g_disc.save_weights('weights/g_disc.h5')
+    #src, gen = ppgn.fit_gan(x_train, epochs=2500, report_freq=100, train_procedure=customGANTrain)
+    ppgn.g_gen.save_weights('weights/g_gen_feuilles.h5')
+    ppgn.g_disc.save_weights('weights/g_disc_feuilles.h5')
 
     #Plot some GAN metrics computed during fit
-    # plt.ion()
+    plt.ion()
     plt.figure()
     plt.plot(np.array(ppgn.g_disc_loss))
     plt.plot(np.array(ppgn.gan_loss)[:, 2])
@@ -151,17 +173,19 @@ if not skipFitGAN:
         img = (np.concatenate((src[i], gen[i]), axis=1)+1)*255/2
         img[img < 0  ] = 0
         img[img > 255] = 255
-        cv2.imwrite('img/gan{}.bmp'.format(i), img)
+        cv2.imwrite('img/feuilles_gan{}.bmp'.format(i), img)
 
-#h2_base = ppgn.enc2.predict(ppgn.enc1.predict(x_test[0:1]))
+h2_base = ppgn.enc2.predict(ppgn.enc1.predict(x_test[0:1]))
 h2_base=None
-for i in range(10):
+for i in range(num_classes):
     samples, h2 = ppgn.sample(i, nbSamples=100,
                               h2_start=h2_base,
                               epsilons=(1e-2, 1, 1e-15),
-                              lr=1, lr_end=1)
+                              lr=.5, lr_end=.5)
     h2_base = None#h2[-1]
     img = (np.concatenate((samples), axis=0)+1)*255/2
     img[img < 0  ] = 0
     img[img > 255] = 255
-    cv2.imwrite('img/samples{}.bmp'.format(i), img)
+    img_grid = img.reshape(input_shape[0]*10, input_shape[1]*10, 1)
+    fname = 'img/feuilles_{}x{}samples{}.bmp'.format(input_shape[0], input_shape[1], i)
+    cv2.imwrite(fname, img_grid)
